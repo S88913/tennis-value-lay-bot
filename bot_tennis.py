@@ -1,4 +1,4 @@
-=== MIGLIORATA VERSIONE CON RIEPILOGO E FILTRI ===
+# === MIGLIORATA VERSIONE CON RIEPILOGO E FILTRI ===
 
 import pandas as pd import requests from datetime import datetime import pytz
 
