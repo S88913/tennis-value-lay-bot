@@ -1,105 +1,81 @@
+=== MIGLIORATA VERSIONE CON RIEPILOGO E FILTRI ===
 
-import os
-import requests
-import pandas as pd
-from datetime import datetime
-from pytz import timezone
+import pandas as pd import requests from datetime import datetime import pytz
 
-# === CONFIG ===
-TELEGRAM_TOKEN = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE"
-CHAT_ID = "6146221712"
-ODDS_API_KEY = "9d0de2745632deb584df9b2edd10176e"
-CSV_PATH = "atp_matches_2024.csv"
-XLSX_PATH_2024 = "2024 (1).xlsx"
-XLSX_PATH_2025 = "2025 (3).xlsx"
+=== CONFIG ===
 
-# === FUNZIONI TELEGRAM ===
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print("Errore Telegram:", e)
+BOT_TOKEN = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE" CHAT_ID = "6146221712" CSV_FILE = "tennis_bets_2025.csv"
 
-# === FUNZIONI UTILI ===
-def get_matches_today():
-    url = "https://api.the-odds-api.com/v4/sports/tennis/odds/"
-    params = {
-        "apiKey": ODDS_API_KEY,
-        "regions": "eu",
-        "markets": "h2h",
-        "oddsFormat": "decimal"
-    }
-    try:
-        res = requests.get(url, params=params)
-        return res.json()
-    except Exception as e:
-        print("Errore chiamata OddsAPI:", e)
-        return []
+def send_telegram_message(message): url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"} try: requests.post(url, data=data) except Exception as e: print("Errore invio messaggio:", e)
 
-def convert_to_rome_time(utc_dt_str):
-    try:
-        utc_dt = datetime.fromisoformat(utc_dt_str.replace("Z", "+00:00"))
-        rome = timezone("Europe/Rome")
-        return utc_dt.astimezone(rome).strftime("%d/%m %H:%M")
-    except:
-        return "?"
+def carica_dati(): try: df = pd.read_csv(CSV_FILE) df["date"] = pd.to_datetime(df["date"]) oggi = pd.Timestamp.now(tz="Europe/Rome").date() df = df[df["date"].dt.date == oggi] return df except Exception as e: send_telegram_message(f"Errore lettura file: {e}") return pd.DataFrame()
 
-# === MAIN ===
-def main():
-    send_telegram_message("🎾 Bot Tennis attivo...")
+def format_orario(): ora = datetime.now(pytz.timezone("Europe/Rome")).strftime("%d/%m/%Y %H:%M") return ora
 
-    # Leggo i dati storici (semplificato)
-    try:
-        df_csv = pd.read_csv(CSV_PATH)
-        df_24 = pd.read_excel(XLSX_PATH_2024)
-        df_25 = pd.read_excel(XLSX_PATH_2025)
-    except Exception as e:
-        send_telegram_message(f"Errore lettura file: {e}")
-        return
+def invia_segnali(): df = carica_dati() if df.empty: return
 
-    matches = get_matches_today()
-    if not matches:
-        send_telegram_message("❌ Nessun match trovato oggi.")
-        return
+count_value = 0
+count_lay = 0
+orari_set = set()
 
-    segnali = []
-    for match in matches:
-        try:
-            teams = match['bookmakers'][0]['markets'][0]['outcomes']
-            if len(teams) < 2:
-                continue
-            p1 = teams[0]
-            p2 = teams[1]
-            quota_p1 = float(p1['price'])
-            quota_p2 = float(p2['price'])
+for _, row in df.iterrows():
+    match_date = pd.to_datetime(row["date"])
+    orario_match = match_date.strftime("%d/%m %H:%M")
+    orari_set.add(orario_match)
 
-            implicita_p1 = round(100 / quota_p1, 1)
-            implicita_p2 = round(100 / quota_p2, 1)
+    torneo = row["tournament"]
+    p1 = row["player_1"]
+    p2 = row["player_2"]
+    quota1 = row["odds_1"]
+    quota2 = row["odds_2"]
+    est_prob_1 = row["est_prob_1"]
+    imp_prob_1 = row["imp_prob_1"]
+    est_prob_2 = row["est_prob_2"]
+    imp_prob_2 = row["imp_prob_2"]
+    bet_type = row["bet_type"]
 
-            # Simulazione probabilità stimata semplificata
-            prob_stimata_p1 = implicita_p1 + 10
-            prob_stimata_p2 = implicita_p2 - 10
+    if bet_type.startswith("value"):
+        count_value += 1
+        quota = quota1 if "Value Player" in bet_type else quota2
+        prob_stimata = est_prob_1 if "Value Player" in bet_type else est_prob_2
+        prob_implicita = imp_prob_1 if "Value Player" in bet_type else imp_prob_2
+        value_player = p1 if "Value Player" in bet_type else p2
+        msg = (
+            f"🟢 *VALUE BET*\n"
+            f"🎾 {p1} vs {p2}\n"
+            f"📍 Torneo: {torneo}\n"
+            f"📆 Data: {orario_match}\n"
+            f"💰 Quota {value_player}: *{quota}*\n"
+            f"📊 Prob. stimata: *{round(prob_stimata*100,1)}%* | Implicita: *{round(prob_implicita*100,1)}%*"
+        )
+        send_telegram_message(msg)
 
-            orario = convert_to_rome_time(match['commence_time'])
-            torneo = match['sport_title']
+    elif bet_type.startswith("lay"):
+        quota = quota1 if "Lay Favorite" in bet_type else quota2
+        prob_stimata = est_prob_1 if "Lay Favorite" in bet_type else est_prob_2
+        prob_implicita = imp_prob_1 if "Lay Favorite" in bet_type else imp_prob_2
+        if prob_stimata < 0.60 and 1.30 <= quota <= 1.60 and (prob_implicita - prob_stimata) > 0.15:
+            count_lay += 1
+            lay_player = p1 if "Lay Favorite" in bet_type else p2
+            msg = (
+                f"🔴 *LAY FAVORITO*\n"
+                f"🎾 {p1} vs {p2}\n"
+                f"📍 Torneo: {torneo}\n"
+                f"📆 Data: {orario_match}\n"
+                f"💰 Quota {lay_player}: *{quota}*\n"
+                f"📊 Prob. stimata: *{round(prob_stimata*100,1)}%* | Implicita: *{round(prob_implicita*100,1)}%*"
+            )
+            send_telegram_message(msg)
 
-            if prob_stimata_p1 > implicita_p1 + 5:
-                segnali.append(f"🟢 *VALUE BET*\n🎾 {p1['name']} vs {p2['name']}\n📍 Torneo: {torneo}\n📆 Data: {orario}\n💰 Quota {p1['name']}: *{quota_p1}*\n📊 Prob. stimata: *{prob_stimata_p1}%* | Implicita: *{implicita_p1}%*")
+# Riepilogo finale
+riepilogo = (
+    f"📋 *RIEPILOGO GIORNALIERO*\n"
+    f"🟢 Value Bet inviate: *{count_value}*\n"
+    f"🔴 Lay Bet inviate: *{count_lay}*\n"
+    f"📅 Match previsti oggi: *{len(orari_set)}* orari diversi\n"
+    f"🕒 Orario attuale: {format_orario()}"
+)
+send_telegram_message(riepilogo)
 
-            if implicita_p1 > prob_stimata_p1 + 10:
-                segnali.append(f"🔴 *LAY FAVORITO*\n🎾 {p1['name']} vs {p2['name']}\n📍 Torneo: {torneo}\n📆 Data: {orario}\n💰 Quota {p1['name']}: *{quota_p1}*\n📊 Prob. stimata: *{prob_stimata_p1}%* | Implicita: *{implicita_p1}%*")
+if name == "main": print("🎾 Bot Tennis attivo...") invia_segnali()
 
-        except Exception as e:
-            print("Errore elaborazione match:", e)
-            continue
-
-    if segnali:
-        for segnale in segnali:
-            send_telegram_message(segnale)
-    else:
-        send_telegram_message("❌ Nessun segnale rilevante oggi.")
-
-if __name__ == "__main__":
-    main()
