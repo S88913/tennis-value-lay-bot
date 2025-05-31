@@ -1,0 +1,2 @@
+date,tournament,player_1,player_2,elo_1,elo_2,odds_1,odds_2,imp_prob_1,imp_prob_2,est_prob_1,est_prob_2,value_diff_1,value_diff_2,bet_type
+2025-06-01,ATP French Open,Carlos Alcaraz,Tommy Paul,1900,1800,1.55,2.45,0.6451612903225806,0.4081632653061224,0.5135135135135135,0.4864864864864865,-0.13164777680906714,0.07832322118036411,value_Tommy Paul
