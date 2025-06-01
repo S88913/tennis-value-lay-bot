@@ -1,79 +1,84 @@
 import pandas as pd
 import requests
-from datetime import datetime
 import pytz
+from datetime import datetime
+from telegram import Bot
 import os
 
-# === CONFIGURAZIONE ===
-TOKEN = '7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE'
-CHAT_ID = '6146221712'
-CSV_PATH = 'tennis_bets_2025.csv'
-LOG_FILE = 'notificati.txt'
-TIMEZONE = 'Europe/Rome'
+# === CONFIG ===
+TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+CSV_PATH = "tennis_bets_2025.csv"
+TIMEZONE = "Europe/Rome"
+MIN_VALUE_ODDS = 1.70
+MAX_LAY_ODDS = 3.00
 
-# === FUNZIONI ===
+bot = Bot(token=TOKEN)
 
-def invia_messaggio(text):
-    url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
-    data = {'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'Markdown'}
-    requests.post(url, data=data)
+def invia_messaggio(messaggio):
+    bot.send_message(chat_id=CHAT_ID, text=messaggio, parse_mode='Markdown')
 
-def leggi_notificati():
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, 'r') as f:
-            return set(line.strip() for line in f)
-    return set()
+def leggi_file():
+    try:
+        df = pd.read_csv(CSV_PATH)
+        df['date'] = pd.to_datetime(df['date']).dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
+        oggi = datetime.now(pytz.timezone(TIMEZONE)).date()
+        df = df[df['date'].dt.date == oggi]
+        return df
+    except Exception as e:
+        invia_messaggio(f"❌ Errore lettura file: {e}")
+        return pd.DataFrame()
 
-def salva_notificato(match_id):
-    with open(LOG_FILE, 'a') as f:
-        f.write(match_id + '\n')
-
-def formatta_valore(row):
-    return (
-        f"🟢 *VALUE BET*\n"
-        f"🎾 {row['player_1']} vs {row['player_2']}\n"
-        f"📍 Torneo: {row['tournament']}\n"
-        f"📆 Data: {row['date']} {row.get('time', '13:00')}\n"
-        f"💰 Quota {row['player_1']}: *{row['odds_1']}*\n"
-        f"📊 Prob. stimata: *{float(row['est_prob_1'])*100:.1f}%* | Implicita: *{float(row['imp_prob_1'])*100:.1f}%*"
-    )
-
-def formatta_lay(row):
-    return (
-        f"🔴 *LAY FAVORITO*\n"
-        f"🎾 {row['player_1']} vs {row['player_2']}\n"
-        f"📍 Torneo: {row['tournament']}\n"
-        f"📆 Data: {row['date']} {row.get('time', '13:00')}\n"
-        f"💰 Quota {row['player_1']}: *{row['odds_1']}*\n"
-        f"📊 Prob. stimata: *{float(row['est_prob_1'])*100:.1f}%* | Implicita: *{float(row['imp_prob_1'])*100:.1f}%*"
-    )
-
-def oggi_iso():
-    oggi = datetime.now(pytz.timezone(TIMEZONE))
-    return oggi.strftime('%Y-%m-%d')
-
-# === AVVIO ===
-invia_messaggio("🎾 Bot Tennis attivo...")
-
-try:
-    df = pd.read_csv(CSV_PATH)
-    df = df[df['date'] == oggi_iso()]
-    notificati = leggi_notificati()
+def crea_messaggi(df):
+    messaggi = []
 
     for _, row in df.iterrows():
-        match_id = f"{row['date']}_{row['player_1']}_vs_{row['player_2']}"
-        if match_id in notificati:
-            continue
+        match_data = row['date'].strftime("%d/%m %H:%M")
+        torneo = row['tournament']
+        p1 = row['player_1']
+        p2 = row['player_2']
+        q1 = row['odds_1']
+        q2 = row['odds_2']
+        ep1 = round(row['est_prob_1'] * 100, 1)
+        ep2 = round(row['est_prob_2'] * 100, 1)
+        ip1 = round(row['imp_prob_1'] * 100, 1)
+        ip2 = round(row['imp_prob_2'] * 100, 1)
+        tipo = row['bet_type']
 
-        if row['bet_type'].startswith('value'):
-            messaggio = formatta_valore(row)
-        elif row['bet_type'].startswith('lay'):
-            messaggio = formatta_lay(row)
-        else:
-            continue
+        if tipo.startswith("value") and q1 >= MIN_VALUE_ODDS:
+            msg = (
+                f"🟢 *VALUE BET*\n"
+                f"🎾 {p1} vs {p2}\n"
+                f"📍 Torneo: {torneo}\n"
+                f"📆 Data: {match_data}\n"
+                f"💰 Quota {p1}: *{q1}*\n"
+                f"📊 Prob. stimata: *{ep1}%* | Implicita: *{ip1}%*"
+            )
+            messaggi.append(msg)
 
-        invia_messaggio(messaggio)
-        salva_notificato(match_id)
+        elif tipo.startswith("lay") and q1 <= MAX_LAY_ODDS:
+            msg = (
+                f"🔴 *LAY FAVORITO*\n"
+                f"🎾 {p1} vs {p2}\n"
+                f"📍 Torneo: {torneo}\n"
+                f"📆 Data: {match_data}\n"
+                f"💰 Quota Lay {p1}: *{q1}*\n"
+                f"📊 Prob. stimata: *{ep1}%* | Implicita: *{ip1}%*"
+            )
+            messaggi.append(msg)
 
-except Exception as e:
-    invia_messaggio(f"❌ Errore: {str(e)}")
+    return messaggi
+
+def main():
+    df = leggi_file()
+    if df.empty:
+        return
+    messaggi = crea_messaggi(df)
+    if not messaggi:
+        invia_messaggio("ℹ️ Nessun segnale valido oggi.")
+    for m in messaggi:
+        invia_messaggio(m)
+
+if __name__ == "__main__":
+    print("🚀 Bot Tennis attivo...")
+    main()
