@@ -5,8 +5,8 @@ import os
 import pytz
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+BOT_TOKEN = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE"
+CHAT_ID = "6146221712"
 CSV_FILE = "tennis_bets_2025.csv"
 NOTIF_FILE = "notificati.txt"
 
