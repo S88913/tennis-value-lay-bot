@@ -20,14 +20,16 @@ def run_script(script):
 if __name__ == "__main__":
     print("🚀 Worker Tennis avviato...")
     
-    # Aspetta le 05:00 ora italiana
+    # Attende le 05:00 ora italiana
     wait_until(5, 0)
+    
+    # Genera il file CSV
     run_script("genera_csv.py")
     
-    # Aspetta altri 10 minuti
+    # Attende 10 minuti
     time.sleep(600)
     
-    # Esegui il bot Telegram
+    # Avvia il bot Telegram
     run_script("bot_tennis.py")
-    
+
     print("😴 Fine. Worker dorme fino al prossimo restart.")
