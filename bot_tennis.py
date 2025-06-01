@@ -1,94 +1,79 @@
-
 import pandas as pd
 import requests
 from datetime import datetime
 import pytz
 import os
 
-BOT_TOKEN = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE"
-CHAT_ID = "6146221712"
-CSV_FILE = "tennis_bets_2025.csv"
-NOTIFICATI_FILE = "notificati.txt"
+# === CONFIGURAZIONE ===
+TOKEN = '7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE'
+CHAT_ID = '6146221712'
+CSV_PATH = 'tennis_bets_2025.csv'
+LOG_FILE = 'notificati.txt'
+TIMEZONE = 'Europe/Rome'
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print("Errore invio messaggio:", e)
+# === FUNZIONI ===
 
-def load_notificati():
-    if not os.path.exists(NOTIFICATI_FILE):
-        return set()
-    with open(NOTIFICATI_FILE, "r") as f:
-        return set(line.strip() for line in f.readlines())
+def invia_messaggio(text):
+    url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
+    data = {'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'Markdown'}
+    requests.post(url, data=data)
 
-def save_notificato(id_partita):
-    with open(NOTIFICATI_FILE, "a") as f:
-        f.write(f"{id_partita}\n")
+def leggi_notificati():
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, 'r') as f:
+            return set(line.strip() for line in f)
+    return set()
 
-def converti_orario_locale(data_str):
-    try:
-        dt = datetime.strptime(data_str, "%Y-%m-%d %H:%M")
-        dt_utc = pytz.utc.localize(dt)
-        dt_local = dt_utc.astimezone(pytz.timezone("Europe/Rome"))
-        return dt_local.strftime("%d/%m %H:%M")
-    except Exception:
-        return data_str
+def salva_notificato(match_id):
+    with open(LOG_FILE, 'a') as f:
+        f.write(match_id + '\n')
 
-def main():
-    print("🎾 Bot Tennis attivo...")
-    notificati = load_notificati()
+def formatta_valore(row):
+    return (
+        f"🟢 *VALUE BET*\n"
+        f"🎾 {row['player_1']} vs {row['player_2']}\n"
+        f"📍 Torneo: {row['tournament']}\n"
+        f"📆 Data: {row['date']} {row.get('time', '13:00')}\n"
+        f"💰 Quota {row['player_1']}: *{row['odds_1']}*\n"
+        f"📊 Prob. stimata: *{float(row['est_prob_1'])*100:.1f}%* | Implicita: *{float(row['imp_prob_1'])*100:.1f}%*"
+    )
 
-    try:
-        df = pd.read_csv(CSV_FILE)
-    except Exception as e:
-        print("Errore lettura file:", e)
-        return
+def formatta_lay(row):
+    return (
+        f"🔴 *LAY FAVORITO*\n"
+        f"🎾 {row['player_1']} vs {row['player_2']}\n"
+        f"📍 Torneo: {row['tournament']}\n"
+        f"📆 Data: {row['date']} {row.get('time', '13:00')}\n"
+        f"💰 Quota {row['player_1']}: *{row['odds_1']}*\n"
+        f"📊 Prob. stimata: *{float(row['est_prob_1'])*100:.1f}%* | Implicita: *{float(row['imp_prob_1'])*100:.1f}%*"
+    )
+
+def oggi_iso():
+    oggi = datetime.now(pytz.timezone(TIMEZONE))
+    return oggi.strftime('%Y-%m-%d')
+
+# === AVVIO ===
+invia_messaggio("🎾 Bot Tennis attivo...")
+
+try:
+    df = pd.read_csv(CSV_PATH)
+    df = df[df['date'] == oggi_iso()]
+    notificati = leggi_notificati()
 
     for _, row in df.iterrows():
-        try:
-            player_1 = row['player_1']
-            player_2 = row['player_2']
-            torneo = row['tournament']
-            data_match = row['date'] + " 11:00"
-            quota_1 = row['odds_1']
-            imp_prob_1 = row['imp_prob_1']
-            est_prob_1 = row['est_prob_1']
-            value_diff_1 = row['value_diff_1']
-            tipo_bet = row['bet_type']
-
-            id_match = f"{player_1}_{player_2}_{data_match}_{tipo_bet}"
-            if id_match in notificati:
-                continue
-
-            if tipo_bet.startswith("value"):
-                messaggio = (
-                    f"🟢 *VALUE BET*\n"
-                    f"🎾 {player_1} vs {player_2}\n"
-                    f"📍 Torneo: {torneo}\n"
-                    f"📆 Data: {converti_orario_locale(data_match)}\n"
-                    f"💰 Quota {player_1}: *{quota_1}*\n"
-                    f"📊 Prob. stimata: *{round(est_prob_1*100,1)}%* | Implicita: *{round(imp_prob_1*100,1)}%*"
-                )
-                send_telegram_message(messaggio)
-                save_notificato(id_match)
-
-            elif tipo_bet.startswith("lay"):
-                messaggio = (
-                    f"🔴 *LAY FAVORITO*\n"
-                    f"🎾 {player_1} vs {player_2}\n"
-                    f"📍 Torneo: {torneo}\n"
-                    f"📆 Data: {converti_orario_locale(data_match)}\n"
-                    f"💰 Quota {player_1}: *{quota_1}*\n"
-                    f"📊 Prob. stimata: *{round(est_prob_1*100,1)}%* | Implicita: *{round(imp_prob_1*100,1)}%*"
-                )
-                send_telegram_message(messaggio)
-                save_notificato(id_match)
-        except Exception as e:
-            print("Errore riga:", e)
+        match_id = f"{row['date']}_{row['player_1']}_vs_{row['player_2']}"
+        if match_id in notificati:
             continue
 
-if __name__ == "__main__":
-    main()
+        if row['bet_type'].startswith('value'):
+            messaggio = formatta_valore(row)
+        elif row['bet_type'].startswith('lay'):
+            messaggio = formatta_lay(row)
+        else:
+            continue
+
+        invia_messaggio(messaggio)
+        salva_notificato(match_id)
+
+except Exception as e:
+    invia_messaggio(f"❌ Errore: {str(e)}")
