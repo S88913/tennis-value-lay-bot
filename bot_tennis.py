@@ -1,84 +1,80 @@
 import pandas as pd
-import requests
-import pytz
-from datetime import datetime
 from telegram import Bot
+from datetime import datetime
 import os
+import pytz
 
 # === CONFIG ===
-TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-CSV_PATH = "tennis_bets_2025.csv"
-TIMEZONE = "Europe/Rome"
-MIN_VALUE_ODDS = 1.70
-MAX_LAY_ODDS = 3.00
+CSV_FILE = "tennis_bets_2025.csv"
+NOTIF_FILE = "notificati.txt"
 
-bot = Bot(token=TOKEN)
+bot = Bot(token=BOT_TOKEN)
 
-def invia_messaggio(messaggio):
-    bot.send_message(chat_id=CHAT_ID, text=messaggio, parse_mode='Markdown')
+def send(msg):
+    bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
 
-def leggi_file():
-    try:
-        df = pd.read_csv(CSV_PATH)
-        df['date'] = pd.to_datetime(df['date']).dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
-        oggi = datetime.now(pytz.timezone(TIMEZONE)).date()
-        df = df[df['date'].dt.date == oggi]
-        return df
-    except Exception as e:
-        invia_messaggio(f"❌ Errore lettura file: {e}")
-        return pd.DataFrame()
+def load_notificati():
+    if not os.path.exists(NOTIF_FILE):
+        return set()
+    with open(NOTIF_FILE, "r") as f:
+        return set(line.strip() for line in f)
 
-def crea_messaggi(df):
-    messaggi = []
-
-    for _, row in df.iterrows():
-        match_data = row['date'].strftime("%d/%m %H:%M")
-        torneo = row['tournament']
-        p1 = row['player_1']
-        p2 = row['player_2']
-        q1 = row['odds_1']
-        q2 = row['odds_2']
-        ep1 = round(row['est_prob_1'] * 100, 1)
-        ep2 = round(row['est_prob_2'] * 100, 1)
-        ip1 = round(row['imp_prob_1'] * 100, 1)
-        ip2 = round(row['imp_prob_2'] * 100, 1)
-        tipo = row['bet_type']
-
-        if tipo.startswith("value") and q1 >= MIN_VALUE_ODDS:
-            msg = (
-                f"🟢 *VALUE BET*\n"
-                f"🎾 {p1} vs {p2}\n"
-                f"📍 Torneo: {torneo}\n"
-                f"📆 Data: {match_data}\n"
-                f"💰 Quota {p1}: *{q1}*\n"
-                f"📊 Prob. stimata: *{ep1}%* | Implicita: *{ip1}%*"
-            )
-            messaggi.append(msg)
-
-        elif tipo.startswith("lay") and q1 <= MAX_LAY_ODDS:
-            msg = (
-                f"🔴 *LAY FAVORITO*\n"
-                f"🎾 {p1} vs {p2}\n"
-                f"📍 Torneo: {torneo}\n"
-                f"📆 Data: {match_data}\n"
-                f"💰 Quota Lay {p1}: *{q1}*\n"
-                f"📊 Prob. stimata: *{ep1}%* | Implicita: *{ip1}%*"
-            )
-            messaggi.append(msg)
-
-    return messaggi
+def save_notificato(id_match):
+    with open(NOTIF_FILE, "a") as f:
+        f.write(id_match + "\n")
 
 def main():
-    df = leggi_file()
-    if df.empty:
+    send("🎾 *Bot Tennis attivo...*")
+    try:
+        df = pd.read_csv(CSV_FILE)
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        today = datetime.now(pytz.timezone("Europe/Rome")).date()
+        df = df[df["date"] == today]
+    except Exception as e:
+        send(f"❌ Errore lettura file: {e}")
         return
-    messaggi = crea_messaggi(df)
-    if not messaggi:
-        invia_messaggio("ℹ️ Nessun segnale valido oggi.")
-    for m in messaggi:
-        invia_messaggio(m)
+
+    notificati = load_notificati()
+    value_count = 0
+    lay_count = 0
+
+    for _, row in df.iterrows():
+        match_id = f"{row['player_1']}_{row['player_2']}_{row['date']}"
+        if match_id in notificati:
+            continue
+
+        tipo = row['bet_type']
+        quota = row['odds_1']
+        msg = ""
+
+        if tipo.startswith("value") and quota >= 1.70:
+            value_count += 1
+            msg = (
+                f"🟢 *VALUE BET*\n"
+                f"🎾 {row['player_1']} vs {row['player_2']}\n"
+                f"📍 {row['tournament']}\n"
+                f"📆 Data: {row['date']}\n"
+                f"💰 Quota: *{quota}*\n"
+                f"📊 Prob: *{round(row['est_prob_1']*100,1)}%* | Implicita: *{round(row['imp_prob_1']*100,1)}%*"
+            )
+        elif tipo.startswith("lay") and quota <= 3.00:
+            lay_count += 1
+            msg = (
+                f"🔴 *LAY FAVORITO*\n"
+                f"🎾 {row['player_1']} vs {row['player_2']}\n"
+                f"📍 {row['tournament']}\n"
+                f"📆 Data: {row['date']}\n"
+                f"💰 Quota Lay: *{quota}*\n"
+                f"📊 Prob: *{round(row['est_prob_1']*100,1)}%* | Implicita: *{round(row['imp_prob_1']*100,1)}%*"
+            )
+
+        if msg:
+            send(msg)
+            save_notificato(match_id)
+
+    send(f"✅ Oggi trovati: *{value_count} Value*, *{lay_count} Lay*")
 
 if __name__ == "__main__":
-    print("🚀 Bot Tennis attivo...")
     main()
