@@ -1,19 +1,18 @@
-
 import requests
 import pandas as pd
 from datetime import datetime
 import pytz
+import os
 
 # === CONFIG ===
-API_KEY = "9d0de2745632deb584df9b2edd10176e"  # OddsAPI gratuita
-BASE_URL = "https://api.the-odds-api.com/v4/sports/tennis/events"
-REGION = "eu"
-MARKET = "h2h"
-CSV_FILE = "tennis_bets_2025.csv"
+API_KEY    = "9d0de2745632deb584df9b2edd10176e"
+BASE_URL   = "https://api.the-odds-api.com/v4/sports/tennis/events"
+REGION     = "eu"
+MARKET     = "h2h"
+CSV_FILE   = "tennis_bets_2025.csv"
 
-# === FUNZIONI DI SUPPORTO ===
 def calcola_probabilità(quota):
-    return round(1 / quota, 4) if quota else 0
+    return round(1/quota, 4) if quota else 0
 
 def stima_probabilità_elo(elo1, elo2):
     diff = elo1 - elo2
@@ -27,64 +26,58 @@ def tipo_scommessa(value_diff1, value_diff2, player1):
         return f"lay_{player1}"
     return ""
 
-# === GENERA FILE ===
 def genera_file():
-    print("📡 Recupero dati da OddsAPI...")
+    print("📡 Recupero dati OddsAPI...")
     params = {
         "apiKey": API_KEY,
         "regions": REGION,
         "markets": MARKET,
         "oddsFormat": "decimal"
     }
-    response = requests.get(BASE_URL, params=params)
-
-    if response.status_code != 200:
-        print("❌ Errore API OddsAPI:", response.status_code, response.text)
+    r = requests.get(BASE_URL, params=params)
+    if r.status_code != 200:
+        print(f"❌ Errore API: {r.status_code} - {r.text}")
         return
-
-    events = response.json()
+    events = r.json()
     print(f"✅ {len(events)} eventi trovati")
 
     dati = []
     oggi = datetime.now(pytz.timezone("Europe/Rome")).date()
 
-    for event in events:
+    for ev in events:
         try:
-            nome1, nome2 = event['participants'][0], event['participants'][1]
-            commence_time = datetime.fromisoformat(event['commence_time'].replace("Z", "+00:00"))
-            data_match = commence_time.astimezone(pytz.timezone("Europe/Rome")).date()
-
+            n1, n2 = ev["participants"][0], ev["participants"][1]
+            ct = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
+            data_match = ct.astimezone(pytz.timezone("Europe/Rome")).date()
             if data_match != oggi:
                 continue
 
-            bookmaker = event['bookmakers'][0]
-            outcomes = bookmaker['markets'][0]['outcomes']
+            bookmaker = ev["bookmakers"][0]
+            outcomes  = bookmaker["markets"][0]["outcomes"]
+            quota1    = next(o["price"] for o in outcomes if o["name"] == n1)
+            quota2    = next(o["price"] for o in outcomes if o["name"] == n2)
+            imp1      = calcola_probabilità(quota1)
+            imp2      = calcola_probabilità(quota2)
 
-            quota1 = next(o['price'] for o in outcomes if o['name'] == nome1)
-            quota2 = next(o['price'] for o in outcomes if o['name'] == nome2)
-
-            imp1 = calcola_probabilità(quota1)
-            imp2 = calcola_probabilità(quota2)
-
-            # Valori ELO fittizi per testing
+            # ELO falsi per esempio (15/06: da sostituire con ELO reali)
             elo1, elo2 = 1800, 1750
-
             est1, est2 = stima_probabilità_elo(elo1, elo2)
-            value1 = est1 - imp1
-            value2 = est2 - imp2
+            val1       = est1 - imp1
+            val2       = est2 - imp2
 
-            bet = tipo_scommessa(value1, value2, nome1)
+            bet = tipo_scommessa(val1, val2, n1)
             if bet == "":
                 continue
 
-            genere = "WTA" if any(n in nome1 for n in ["Swiatek", "Sabalenka", "Gauff", "Svitolina"]) else "ATP"
-            torneo = f"{genere} French Open"
+            # Decide torneo in base al nome del giocatore (ATP/WTA semplificato)
+            genere  = "WTA" if any(x in n1 for x in ["Swiatek","Sabalenka","Gauff","Svitolina"]) else "ATP"
+            torneo  = f"{genere} French Open"
 
             dati.append({
                 "date": str(data_match),
                 "tournament": torneo,
-                "player_1": nome1,
-                "player_2": nome2,
+                "player_1": n1,
+                "player_2": n2,
                 "elo_1": elo1,
                 "elo_2": elo2,
                 "odds_1": quota1,
@@ -93,22 +86,23 @@ def genera_file():
                 "imp_prob_2": imp2,
                 "est_prob_1": est1,
                 "est_prob_2": est2,
-                "value_diff_1": value1,
-                "value_diff_2": value2,
+                "value_diff_1": val1,
+                "value_diff_2": val2,
                 "bet_type": bet
             })
-
         except Exception as e:
-            print(f"⚠️ Errore evento: {e}")
+            print(f"⚠️ Errore parsing evento: {e}")
             continue
 
     if not dati:
         print("🚫 Nessun segnale valido oggi.")
+        # Sovrascrivi comunque per chiarezza (file vuoto)
+        pd.DataFrame(dati).to_csv(CSV_FILE, index=False)
         return
 
     df = pd.DataFrame(dati)
     df.to_csv(CSV_FILE, index=False)
-    print(f"📁 File salvato: {CSV_FILE}")
+    print(f"📁 {CSV_FILE} creato con {len(df)} righe.")
 
 if __name__ == "__main__":
     genera_file()
