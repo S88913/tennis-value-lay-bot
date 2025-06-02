@@ -6,10 +6,10 @@ import pytz
 import time
 
 # === CONFIG ===
-BOT_TOKEN = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE"
-CHAT_ID = "6146221712"
-CSV_FILE = "tennis_bets_2025.csv"
-NOTIF_FILE = "notificati.txt"
+BOT_TOKEN   = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE"
+CHAT_ID     = "6146221712"
+CSV_FILE    = "tennis_bets_2025.csv"
+NOTIF_FILE  = "notificati.txt"
 
 bot = Bot(token=BOT_TOKEN)
 
@@ -17,39 +17,56 @@ def send(msg):
     bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
 
 def load_notificati():
+    """
+    Ritorna un insieme di date già notificate (una riga = una data).
+    - Se il file NON esiste, restituisce insieme vuoto.
+    """
     if not os.path.exists(NOTIF_FILE):
         return set()
     with open(NOTIF_FILE, "r") as f:
         return set(line.strip() for line in f if line.strip())
 
-def save_notificato(match_id):
+def save_notificato(entry):
+    """
+    Salva nel file NOTIF_FILE l'entry fornita (di solito la data odierna).
+    Ogni chiamata aggiunge una riga.
+    """
     with open(NOTIF_FILE, "a") as f:
-        f.write(match_id + "\n")
+        f.write(entry + "\n")
 
-if __name__ == "__main__":
+def main():
+    # Calcola la data di oggi (fuso Europe/Rome)
+    today = datetime.now(pytz.timezone("Europe/Rome")).date()
+
+    # Carica il set di date già notificate
     notificati = load_notificati()
-    send("🎾 Bot Tennis attivo...")
 
+    # Se oggi è già stato notificato, esci subito
+    if str(today) in notificati:
+        print("📛 Segnali di oggi già inviati, esco.")
+        return
+
+    # Inizio invio segnali
+    send("🎾 *Bot Tennis attivo...*")
+
+    # Provo a leggere il CSV e filtrare i match di oggi
     try:
         df = pd.read_csv(CSV_FILE)
         df["date"] = pd.to_datetime(df["date"]).dt.date
-        today = datetime.now(pytz.timezone("Europe/Rome")).date()
         df = df[df["date"] == today]
     except Exception as e:
         send(f"❌ Errore lettura file: {e}")
-        exit()
+        return
 
     value_count = 0
-    lay_count = 0
+    lay_count   = 0
+    messaggi    = []
 
+    # Scorri ogni riga (match) e costruisci i messaggi value/lay
     for _, row in df.iterrows():
-        match_id = f"{row['player_1']}_{row['player_2']}_{row['date']}"
-        if match_id in notificati:
-            continue
-
-        tipo = row['bet_type']
+        tipo  = row['bet_type']
         quota = row['odds_1']
-        msg = ""
+        msg   = ""
 
         if tipo.startswith("value") and quota >= 1.70:
             value_count += 1
@@ -61,7 +78,6 @@ if __name__ == "__main__":
                 f"💰 Quota: *{quota}*\n"
                 f"📊 Prob: *{round(row['est_prob_1']*100,1)}%* | Implicita: *{round(row['imp_prob_1']*100,1)}%*"
             )
-
         elif tipo.startswith("lay") and quota <= 3.00:
             lay_count += 1
             msg = (
@@ -74,9 +90,18 @@ if __name__ == "__main__":
             )
 
         if msg:
-            send(msg)
-            save_notificato(match_id)
-            time.sleep(1.5)
+            messaggi.append(msg)
 
-    if value_count > 0 or lay_count > 0:
-        send(f"✅ Oggi trovati: *{value_count} Value*, *{lay_count} Lay*")
+    # Invia tutti i messaggi raccolti
+    for m in messaggi:
+        send(m)
+        time.sleep(1.5)  # piccolo ritardo per non inchiodare Telegram
+
+    # Invia riepilogo se c’è almeno un segnale
+    send(f"✅ Oggi trovati: {value_count} Value, {lay_count} Lay")
+
+    # Registra che oggi abbiamo già notificato (salva la data)
+    save_notificato(str(today))
+
+if __name__ == "__main__":
+    main()
