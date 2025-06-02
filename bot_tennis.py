@@ -3,6 +3,7 @@ from telegram import Bot
 from datetime import datetime
 import os
 import pytz
+import time
 
 # === CONFIG ===
 BOT_TOKEN = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE"
@@ -19,14 +20,16 @@ def load_notificati():
     if not os.path.exists(NOTIF_FILE):
         return set()
     with open(NOTIF_FILE, "r") as f:
-        return set(line.strip() for line in f)
+        return set(line.strip() for line in f if line.strip())
 
-def save_notificato(id_match):
+def save_notificato(match_id):
     with open(NOTIF_FILE, "a") as f:
-        f.write(id_match + "\n")
+        f.write(match_id + "\n")
 
-def main():
-    send("🎾 *Bot Tennis attivo...*")
+if __name__ == "__main__":
+    notificati = load_notificati()
+    send("🎾 Bot Tennis attivo...")
+
     try:
         df = pd.read_csv(CSV_FILE)
         df["date"] = pd.to_datetime(df["date"]).dt.date
@@ -34,9 +37,8 @@ def main():
         df = df[df["date"] == today]
     except Exception as e:
         send(f"❌ Errore lettura file: {e}")
-        return
+        exit()
 
-    notificati = load_notificati()
     value_count = 0
     lay_count = 0
 
@@ -59,6 +61,7 @@ def main():
                 f"💰 Quota: *{quota}*\n"
                 f"📊 Prob: *{round(row['est_prob_1']*100,1)}%* | Implicita: *{round(row['imp_prob_1']*100,1)}%*"
             )
+
         elif tipo.startswith("lay") and quota <= 3.00:
             lay_count += 1
             msg = (
@@ -73,8 +76,7 @@ def main():
         if msg:
             send(msg)
             save_notificato(match_id)
+            time.sleep(1.5)
 
-    send(f"✅ Oggi trovati: *{value_count} Value*, *{lay_count} Lay*")
-
-if __name__ == "__main__":
-    main()
+    if value_count > 0 or lay_count > 0:
+        send(f"✅ Oggi trovati: *{value_count} Value*, *{lay_count} Lay*")
