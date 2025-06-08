@@ -1,107 +1,108 @@
-import pandas as pd
+#!/usr/bin/env python3
+import os
+import requests
 from telegram import Bot
 from datetime import datetime
-import os
 import pytz
 import time
+from dotenv import load_dotenv
 
-# === CONFIG ===
-BOT_TOKEN   = "7359337286:AAFmojWUP9eCKcDLNj5YFb0h_LjJuhjf5uE"
-CHAT_ID     = "6146221712"
-CSV_FILE    = "tennis_bets_2025.csv"
-NOTIF_FILE  = "notificati.txt"
+# === CARICAMENTO CONFIG ===
+load_dotenv()  # legge .env se presente
+BOT_TOKEN       = os.getenv("BOT_TOKEN")
+CHAT_ID         = os.getenv("CHAT_ID")
+API_URL         = os.getenv("MATCHES_API_URL")
+API_KEY         = os.getenv("MATCHES_API_KEY")
+NOTIF_FILE      = "notificati.txt"
+
+MIN_VALUE       = 1.70
+MAX_LAY         = 3.00
 
 bot = Bot(token=BOT_TOKEN)
 
-def send(msg):
-    bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
+def send(msg: str):
+    bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
 
 def load_notificati():
-    """
-    Ritorna un insieme di date già notificate (una riga = una data).
-    - Se il file NON esiste, restituisce insieme vuoto.
-    """
     if not os.path.exists(NOTIF_FILE):
         return set()
-    with open(NOTIF_FILE, "r") as f:
+    with open(NOTIF_FILE) as f:
         return set(line.strip() for line in f if line.strip())
 
-def save_notificato(entry):
-    """
-    Salva nel file NOTIF_FILE l'entry fornita (di solito la data odierna).
-    Ogni chiamata aggiunge una riga.
-    """
+def save_notificato(entry: str):
     with open(NOTIF_FILE, "a") as f:
         f.write(entry + "\n")
 
-def main():
-    # Calcola la data di oggi (fuso Europe/Rome)
-    today = datetime.now(pytz.timezone("Europe/Rome")).date()
+def fetch_matches():
+    """Chiama la tua API privata e ritorna lista di match."""
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    resp = requests.get(API_URL, headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
 
-    # Carica il set di date già notificate
+def main():
+    tz         = pytz.timezone("Europe/Rome")
+    today      = datetime.now(tz).date()
+    s_today    = str(today)
     notificati = load_notificati()
 
-    # Se oggi è già stato notificato, esci subito
-    if str(today) in notificati:
-        print("📛 Segnali di oggi già inviati, esco.")
+    # if already sent today, exit
+    if s_today in notificati:
+        print("🔒 Segnali di oggi già inviati, esco.")
         return
 
-    # Inizio invio segnali
-    send("🎾 *Bot Tennis attivo...*")
+    send("🎾 *Bot Tennis attivo…*")
 
-    # Provo a leggere il CSV e filtrare i match di oggi
     try:
-        df = pd.read_csv(CSV_FILE)
-        df["date"] = pd.to_datetime(df["date"]).dt.date
-        df = df[df["date"] == today]
+        matches = fetch_matches()
     except Exception as e:
-        send(f"❌ Errore lettura file: {e}")
+        send(f"❌ Errore API: {e}")
         return
 
-    value_count = 0
-    lay_count   = 0
-    messaggi    = []
+    value_count, lay_count = 0, 0
+    for m in matches:
+        if m.get("date") != s_today:
+            continue
 
-    # Scorri ogni riga (match) e costruisci i messaggi value/lay
-    for _, row in df.iterrows():
-        tipo  = row['bet_type']
-        quota = row['odds_1']
-        msg   = ""
+        bt   = m.get("bet_type","")
+        q1   = float(m.get("odds_1",0))
+        p1   = m.get("player_1")
+        p2   = m.get("player_2")
+        tour = m.get("tournament")
+        ep1  = float(m.get("est_prob_1",0))
+        ip1  = float(m.get("imp_prob_1",0))
 
-        if tipo.startswith("value") and quota >= 1.70:
+        if bt.startswith("value") and q1 >= MIN_VALUE:
             value_count += 1
-            msg = (
+            send(
                 f"🟢 *VALUE BET*\n"
-                f"🎾 {row['player_1']} vs {row['player_2']}\n"
-                f"📍 {row['tournament']}\n"
-                f"📆 Data: {row['date']}\n"
-                f"💰 Quota: *{quota}*\n"
-                f"📊 Prob: *{round(row['est_prob_1']*100,1)}%* | Implicita: *{round(row['imp_prob_1']*100,1)}%*"
+                f"🎾 {p1} vs {p2}\n"
+                f"📍 {tour}\n"
+                f"📆 Data: {s_today}\n"
+                f"💰 Quota: *{q1}*\n"
+                f"📊 Prob: *{ep1*100:.1f}%* | Implicita: *{ip1*100:.1f}%*"
             )
-        elif tipo.startswith("lay") and quota <= 3.00:
+            time.sleep(1.5)
+
+        elif bt.startswith("lay") and q1 <= MAX_LAY:
             lay_count += 1
-            msg = (
+            send(
                 f"🔴 *LAY FAVORITO*\n"
-                f"🎾 {row['player_1']} vs {row['player_2']}\n"
-                f"📍 {row['tournament']}\n"
-                f"📆 Data: {row['date']}\n"
-                f"💰 Quota Lay: *{quota}*\n"
-                f"📊 Prob: *{round(row['est_prob_1']*100,1)}%* | Implicita: *{round(row['imp_prob_1']*100,1)}%*"
+                f"🎾 {p1} vs {p2}\n"
+                f"📍 {tour}\n"
+                f"📆 Data: {s_today}\n"
+                f"💰 Quota Lay: *{q1}*\n"
+                f"📊 Prob: *{ep1*100:.1f}%* | Implicita: *{ip1*100:.1f}%*"
             )
+            time.sleep(1.5)
 
-        if msg:
-            messaggi.append(msg)
+    # riepilogo
+    if value_count or lay_count:
+        send(f"✅ Oggi trovati: {value_count} Value, {lay_count} Lay")
+    else:
+        send("✅ Oggi non ci sono segnali validi.")
 
-    # Invia tutti i messaggi raccolti
-    for m in messaggi:
-        send(m)
-        time.sleep(1.5)  # piccolo ritardo per non inchiodare Telegram
-
-    # Invia riepilogo se c’è almeno un segnale
-    send(f"✅ Oggi trovati: {value_count} Value, {lay_count} Lay")
-
-    # Registra che oggi abbiamo già notificato (salva la data)
-    save_notificato(str(today))
+    save_notificato(s_today)
 
 if __name__ == "__main__":
     main()
